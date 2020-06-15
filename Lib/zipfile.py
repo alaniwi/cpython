@@ -1312,16 +1312,27 @@ class ZipFile:
                 raise LargeZipFile(
                     "Zipfile size would require ZIP64 extensions")
 
-    def write(self, filename, arcname=None, compress_type=None):
+    def write(self, filename, arcname=None, compress_type=None,
+              fp=None, mtime=None, size=None, isdir=None,
+              mode=None):
         """Put the bytes from filename into the archive under the name
         arcname."""
         if not self.fp:
             raise RuntimeError(
                 "Attempt to write to ZIP archive that was already closed")
 
-        st = os.stat(filename)
-        isdir = stat.S_ISDIR(st.st_mode)
-        mtime = time.localtime(st.st_mtime)
+        if isdir:
+            assert(mtime != None and size in (0, None) and fp == None)
+            size = 0
+        elif fp:
+            assert(mtime != None and size != None and isdir == None)
+            isdir = False
+        else:
+            assert(mode == None)
+            st = os.stat(filename)
+            isdir = stat.S_ISDIR(st.st_mode)
+            mtime = time.localtime(st.st_mtime)
+            
         date_time = mtime[0:6]
         # Create ZipInfo instance to store file information
         if arcname is None:
@@ -1332,13 +1343,12 @@ class ZipFile:
         if isdir:
             arcname += '/'
         zinfo = ZipInfo(arcname, date_time)
-        zinfo.external_attr = (st[0] & 0xFFFF) << 16      # Unix attributes
-        if compress_type is None:
+        zinfo.external_attr = (mode if mode != None else st[0] & 0xFFFF) << 16          if compress_type is None:
             zinfo.compress_type = self.compression
         else:
             zinfo.compress_type = compress_type
 
-        zinfo.file_size = st.st_size
+        zinfo.file_size = size if size != None else st.st_size
         zinfo.flag_bits = 0x00
         zinfo.header_offset = self.fp.tell()    # Start of header bytes
         if zinfo.compress_type == ZIP_LZMA:
@@ -1358,7 +1368,7 @@ class ZipFile:
             return
 
         cmpr = _get_compressor(zinfo.compress_type)
-        with open(filename, "rb") as fp:
+        with fp or open(filename, "rb") as fp:
             # Must overwrite CRC and sizes with correct data later
             zinfo.CRC = CRC = 0
             zinfo.compress_size = compress_size = 0
